@@ -32,6 +32,7 @@ Shader "Hidden/Universal Render Pipeline/StencilDeferred"
     #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
     #include "Packages/com.unity.render-pipelines.universal/Shaders/Utils/Deferred.hlsl"
     #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Shadows.hlsl"
+    #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/FoveatedRenderingKeywords.hlsl"
     #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/FoveatedRendering.hlsl"
 
     struct Attributes
@@ -244,9 +245,12 @@ Shader "Hidden/Universal Render Pipeline/StencilDeferred"
 
         float2 screen_uv = (input.screenUV.xy / input.screenUV.z);
 
-#if defined(_FOVEATED_RENDERING_NON_UNIFORM_RASTER)
+#if defined(SUPPORTS_FOVEATED_RENDERING_NON_UNIFORM_RASTER)
         float2 undistorted_screen_uv = screen_uv;
-        screen_uv = input.positionCS.xy * _ScreenSize.zw;
+        UNITY_BRANCH if (_FOVEATED_RENDERING_NON_UNIFORM_RASTER)
+        {
+            screen_uv = input.positionCS.xy * _ScreenSize.zw;
+        }
 #endif
 
         half4 shadowMask = 1.0;
@@ -283,9 +287,12 @@ Shader "Hidden/Universal Render Pipeline/StencilDeferred"
             return half4(color, alpha); // Cannot discard because stencil must be updated.
         #endif
 
-        #if defined(_FOVEATED_RENDERING_NON_UNIFORM_RASTER)
-        input.positionCS.xy = undistorted_screen_uv * _ScreenSize.xy;
-        #endif
+#if defined(SUPPORTS_FOVEATED_RENDERING_NON_UNIFORM_RASTER)
+        UNITY_BRANCH if (_FOVEATED_RENDERING_NON_UNIFORM_RASTER)
+        {
+            input.positionCS.xy = undistorted_screen_uv * _ScreenSize.xy;
+        }
+#endif
 
         #if defined(USING_STEREO_MATRICES)
         int eyeIndex = unity_StereoEyeIndex;
@@ -453,12 +460,9 @@ Shader "Hidden/Universal Render Pipeline/StencilDeferred"
             #pragma multi_compile_fragment _ _GBUFFER_NORMALS_OCT
             #pragma multi_compile_fragment _ _DEFERRED_MIXED_LIGHTING
             #pragma multi_compile_fragment _ _SCREEN_SPACE_OCCLUSION
-            #pragma multi_compile_fragment _ _LIGHT_LAYERS
             #pragma multi_compile_fragment _ _RENDER_PASS_ENABLED
             #pragma multi_compile_fragment _ _LIGHT_COOKIES
-            #pragma multi_compile_fragment _ _FOVEATED_RENDERING_NON_UNIFORM_RASTER
-            // Foveated rendering currently not supported in dxc on metal
-            #pragma never_use_dxc metal
+            #pragma multi_compile _ _LIGHT_LAYERS
 
             #pragma vertex Vertex
             #pragma fragment DeferredShading
@@ -503,12 +507,9 @@ Shader "Hidden/Universal Render Pipeline/StencilDeferred"
             #pragma multi_compile_fragment _ _GBUFFER_NORMALS_OCT
             #pragma multi_compile_fragment _ _DEFERRED_MIXED_LIGHTING
             #pragma multi_compile_fragment _ _SCREEN_SPACE_OCCLUSION
-            #pragma multi_compile_fragment _ _LIGHT_LAYERS
             #pragma multi_compile_fragment _ _RENDER_PASS_ENABLED
             #pragma multi_compile_fragment _ _LIGHT_COOKIES
-            #pragma multi_compile_fragment _ _FOVEATED_RENDERING_NON_UNIFORM_RASTER
-            // Foveated rendering currently not supported in dxc on metal
-            #pragma never_use_dxc metal
+            #pragma multi_compile _ _LIGHT_LAYERS
 
             #pragma vertex Vertex
             #pragma fragment DeferredShading
@@ -555,12 +556,9 @@ Shader "Hidden/Universal Render Pipeline/StencilDeferred"
             #pragma multi_compile_fragment _ _GBUFFER_NORMALS_OCT
             #pragma multi_compile_fragment _ _DEFERRED_MIXED_LIGHTING
             #pragma multi_compile_fragment _ _SCREEN_SPACE_OCCLUSION
-            #pragma multi_compile_fragment _ _LIGHT_LAYERS
             #pragma multi_compile_fragment _ _RENDER_PASS_ENABLED
             #pragma multi_compile_fragment _ _LIGHT_COOKIES
-            #pragma multi_compile_fragment _ _FOVEATED_RENDERING_NON_UNIFORM_RASTER
-            // Foveated rendering currently not supported in dxc on metal
-            #pragma never_use_dxc metal
+            #pragma multi_compile _ _LIGHT_LAYERS
 
             #pragma vertex Vertex
             #pragma fragment DeferredShading
@@ -597,6 +595,7 @@ Shader "Hidden/Universal Render Pipeline/StencilDeferred"
 
             #pragma multi_compile _DIRECTIONAL
             #pragma multi_compile_fragment _SIMPLELIT
+            #pragma multi_compile _ _LIGHT_LAYERS
             #pragma multi_compile_fragment _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE _MAIN_LIGHT_SHADOWS_SCREEN
             #pragma multi_compile_fragment _ _DEFERRED_MAIN_LIGHT
             #pragma multi_compile_fragment _ _DEFERRED_FIRST_LIGHT
@@ -607,12 +606,8 @@ Shader "Hidden/Universal Render Pipeline/StencilDeferred"
             #pragma multi_compile_fragment _ _GBUFFER_NORMALS_OCT
             #pragma multi_compile_fragment _ _DEFERRED_MIXED_LIGHTING
             #pragma multi_compile_fragment _ _SCREEN_SPACE_OCCLUSION
-            #pragma multi_compile_fragment _ _LIGHT_LAYERS
             #pragma multi_compile_fragment _ _RENDER_PASS_ENABLED
             #pragma multi_compile_fragment _ _LIGHT_COOKIES
-            #pragma multi_compile_fragment _ _FOVEATED_RENDERING_NON_UNIFORM_RASTER
-            // Foveated rendering currently not supported in dxc on metal
-            #pragma never_use_dxc metal
 
             #pragma vertex Vertex
             #pragma fragment DeferredShading

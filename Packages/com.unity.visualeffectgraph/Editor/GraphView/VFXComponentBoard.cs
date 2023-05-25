@@ -215,6 +215,8 @@ namespace UnityEditor.VFX.UI
             capabilities |= Capabilities.Movable;
 
             RegisterCallback<MouseDownEvent>(OnMouseClick);
+            // Prevent graphview from zooming in/out when using the mouse wheel over the component board
+            RegisterCallback<WheelEvent>(e => e.StopPropagation());
 
             style.position = PositionType.Absolute;
 
@@ -368,7 +370,6 @@ namespace UnityEditor.VFX.UI
         {
             if (controller != null && m_AttachedComponent != null && m_View.controller.graph != null)
             {
-                controller.RecompileExpressionGraphIfNeeded();
                 bool wasRecording = false;
                 if (m_BoundsRecorder != null)
                 {
@@ -821,6 +822,7 @@ namespace UnityEditor.VFX.UI
             if (systemNamesChanged)
                 UpdateBoundsRecorder();
         }
+
 
         Dictionary<string, VFXComponentBoardEventUI> m_Events = new Dictionary<string, VFXComponentBoardEventUI>();
 

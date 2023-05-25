@@ -658,6 +658,7 @@ namespace UnityEngine.Rendering.HighDefinition
             LensFlareCommonSRP.Initialize();
 
             Hammersley.Initialize();
+            DecalSystem.instance.Initialize();
         }
 
 #if UNITY_EDITOR
@@ -1133,6 +1134,7 @@ namespace UnityEngine.Rendering.HighDefinition
                 m_ShaderVariablesGlobalCB._EnableRecursiveRayTracing = 0;
                 m_ShaderVariablesGlobalCB._SpecularOcclusionBlend = 1.0f;
             }
+            m_ShaderVariablesGlobalCB._ColorPyramidUvScaleAndLimitPrevFrame = HDUtils.ComputeViewportScaleAndLimit(hdCamera.historyRTHandleProperties.previousViewportSize, hdCamera.historyRTHandleProperties.previousRenderTargetSize);
 
             ConstantBuffer.PushGlobal(cmd, m_ShaderVariablesGlobalCB, HDShaderIDs._ShaderVariablesGlobal);
         }
@@ -1350,6 +1352,15 @@ namespace UnityEngine.Rendering.HighDefinition
                             needCulling = false;
                             m_SkyManager.UpdateCurrentSkySettings(hdCamera);
                         }
+                    }
+
+                    // Skip request for the second pass: culling the same camera twice in a row would crash the editor/player.
+                    // https://jira.unity3d.com/browse/UUM-41447
+                    if (needCulling == true && m_ActiveTerrains.Count > 0)
+                    {
+                        Debug.LogWarning("The current XR provider does not support rendering Terrain under the XR multipass rendering mode. Please set the XR render mode to single pass or multi-view in the XR provider settings.");
+                        needCulling = false;
+                        skipRequest = true;
                     }
                 }
 
@@ -1897,9 +1908,11 @@ namespace UnityEngine.Rendering.HighDefinition
                 return;
 #endif
 
-            // When HDR is active we render UI overlay per camera as we want all UI to be calibrated to white paper inside a single pass
-            // for performance reasons otherwise we render UI overlay after all camera
-            SupportedRenderingFeatures.active.rendersUIOverlay = HDROutputForAnyDisplayIsActive();
+            // When HDR is active we enforce UI overlay per camera as we want all UI to be calibrated to white paper inside a single pass
+            if (HDROutputForAnyDisplayIsActive())
+            {
+                SupportedRenderingFeatures.active.rendersUIOverlay = true;
+            }
 
 #if UNITY_2021_1_OR_NEWER
             if (!m_ValidAPI || cameras.Count == 0)

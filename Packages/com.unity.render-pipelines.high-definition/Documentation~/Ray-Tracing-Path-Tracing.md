@@ -45,6 +45,7 @@ Path tracing uses the [Volume](Volumes.md) framework, so to enable this feature,
 | **Maximum Depth**           | Set the maximum number of light bounces in each path. You can not set this to be lower than Minimum Depth.<br /> **Note**: You can set this and Minimum Depth to 1 if you only want to direct lighting. You can set them both to 2 if you only want to visualize indirect lighting (which is only visible on the second bounce). |
 | **Maximum Intensity**       | Set a value to clamp the intensity of the light value each bounce returns. This avoids bright, isolated pixels in the final result.<br />**Note**: This property can make the final image dimmer, so if the result looks dark, increase the value of this property. |
 | **Sky Importance Sampling** | Set the sky sampling mode. Importance sampling favors the brightest directions, which is beneficial when using a sky model with high contrast and intense spots (like a sun, or street lights). On the other hand, it can be slightly detrimental when using a smooth, uniform sky. It's active by default for HDRI skies only, but can also be turned On and Off, regardless of the type of sky in use. |
+| **Seed Mode**               | Set how the path tracer generates random numbers. The seed is the pattern the noise has. When accumulating samples, every frame needs a different seed. Otherwise, the same noisy image gets accumulated over and over. **Seed Mode** has the following options:<br />&#8226; **Non Repeating**: The seed is chosen based on the camera frame count. When the accumulation resets, it is not reset to zero. <br />&#8226; **Repeating**: The seed is reset every time the accumulation is reset. Rendering of every image is done using the same random numbers. This is the default option.|
 | **Denoising** | Enable this feature to denoise the output of the the path tracer. This feature is only available if the **Unity Denoising Package** is installed in your project. There are three available options in HDRP:<br />
 - **None**: Disables denoising (this is the default option).<br />
 - **Intel Open Image Denoise** : Performs denoising using the Intel Open Image Denoise library.<br />
@@ -167,6 +168,14 @@ If there is any noise that affects the exposure in the final converged frame, ad
 * **Limit Min**
 
 * **Limit Max**
+
+## Path tracing and Light sources 
+
+Due to the fundamentally different nature of Path Tracing, light sources are queried differently. To support this, the path tracer needs to build some additional data structures that contain light source information. These data structures limit the maximum number of lights that can be evaluated in local neighborhoods. In the current implementation, there are two such data structures. 
+
+The first one is the [Ray Tracing Light Cluster](Ray-Tracing-Light-Cluster.md). It is used to resolve the lights around a specific point. The maximum number of lights per cell in this cluster can be increased if necessary. 
+
+The second one is the Path Tracing light list, an internal data structure used to capture all light sources relevant to a specific path segment. If too many light sources are close to each other, they might not all fit in the light list. This might result in artifacts. To remove these artifacts, you can change the `PathTracingMaxLightCount` setting through the [HDRP Config mechanism](https://docs.unity3d.com/Packages/com.unity.render-pipelines.high-definition@latest/index.html?subfolder=/manual/HDRP-Config-Package.html).
 
 ## Limitations
 

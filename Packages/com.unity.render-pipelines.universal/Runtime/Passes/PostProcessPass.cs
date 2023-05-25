@@ -98,7 +98,7 @@ namespace UnityEngine.Rendering.Universal
 
         // Use Fast conversions between SRGB and Linear
         bool m_UseFastSRGBLinearConversion;
-        
+
         // Support Data Driven Lens Flare post process effect
         bool m_SupportDataDrivenLensFlare;
 
@@ -382,6 +382,10 @@ namespace UnityEngine.Rendering.Universal
             bool useMotionBlur = m_MotionBlur.IsActive() && !isSceneViewCamera;
             bool usePaniniProjection = m_PaniniProjection.IsActive() && !isSceneViewCamera;
 
+            // Disable MotionBlur in EditMode, so that editing remains clear and readable.
+            // NOTE: HDRP does the same via CoreUtils::AreAnimatedMaterialsEnabled().
+            useMotionBlur = useMotionBlur && Application.isPlaying;
+
             // Note that enabling jitters uses the same CameraData::IsTemporalAAEnabled(). So if we add any other kind of overrides (like
             // disable useTemporalAA if another feature is disabled) then we need to put it in CameraData::IsTemporalAAEnabled() as opposed
             // to tweaking the value here.
@@ -627,7 +631,8 @@ namespace UnityEngine.Rendering.Universal
                 {
                     if (resolveToDebugScreen)
                     {
-                        debugHandler.BlitTextureToDebugScreenTexture(cmd, GetSource(), m_Materials.uber, 0);
+                        // Blit to the debugger texture instead of the camera target
+                        Blitter.BlitCameraTexture(cmd, GetSource(), debugHandler.DebugScreenColorHandle, RenderBufferLoadAction.Load, RenderBufferStoreAction.Store, m_Materials.uber, 0);
                         renderer.ConfigureCameraTarget(debugHandler.DebugScreenColorHandle, debugHandler.DebugScreenDepthHandle);
                     }
                     else
@@ -1391,7 +1396,7 @@ namespace UnityEngine.Rendering.Universal
 
                 SetupHDROutput(cameraData.hdrDisplayInformation, cameraData.hdrDisplayColorGamut, material, hdrOperations);
             }
-            
+
             DebugHandler debugHandler = GetActiveDebugHandler(ref renderingData);
             bool resolveToDebugScreen = debugHandler != null && debugHandler.WriteToDebugScreenTexture(ref cameraData);
             debugHandler?.UpdateShaderGlobalPropertiesForFinalValidationPass(cmd, ref cameraData, m_IsFinalPass && !resolveToDebugScreen);
@@ -1439,17 +1444,20 @@ namespace UnityEngine.Rendering.Universal
                 {
                     if (requireHDROutput)
                     {
-                        SetupHDROutput(cameraData.hdrDisplayInformation, cameraData.hdrDisplayColorGamut, m_Materials.scalingSetup, hdrOperations);
+                        SetupHDROutput(cameraData.hdrDisplayInformation, cameraData.hdrDisplayColorGamut, m_Materials.scalingSetup, HDROutputUtils.Operation.None);
                     }
 
-                    if (isFxaaEnabled)
+                    if (isFxaaEnabled && isFsrEnabled)
+                    {
+                        m_Materials.scalingSetup.EnableKeyword(ShaderKeywordStrings.FxaaAndGamma20);
+                    }
+                    else if (isFxaaEnabled)
                     {
                         m_Materials.scalingSetup.EnableKeyword(ShaderKeywordStrings.Fxaa);
                     }
-
-                    if (isFsrEnabled)
+                    else if (isFsrEnabled)
                     {
-                        m_Materials.scalingSetup.EnableKeyword(hdrOperations.HasFlag(HDROutputUtils.Operation.ColorEncoding) ? ShaderKeywordStrings.Gamma20AndHDRInput : ShaderKeywordStrings.Gamma20);
+                        m_Materials.scalingSetup.EnableKeyword(ShaderKeywordStrings.Gamma20);
                     }
 
                     RenderingUtils.ReAllocateIfNeeded(ref m_ScalingSetupTarget, tempRtDesc, FilterMode.Point, TextureWrapMode.Clamp, name: "_ScalingSetupTexture");
@@ -1546,12 +1554,13 @@ namespace UnityEngine.Rendering.Universal
                 material.EnableKeyword(ShaderKeywordStrings.Rcas);
                 FSRUtils.SetRcasConstantsLinear(cmd, cameraData.taaSettings.contrastAdaptiveSharpening);
             }
-            
+
             var cameraTarget = RenderingUtils.GetCameraTargetIdentifier(ref renderingData);
 
             if (resolveToDebugScreen)
             {
-                debugHandler.BlitTextureToDebugScreenTexture(cmd, sourceTex, material, 0);
+                // Blit to the debugger texture instead of the camera target
+                Blitter.BlitCameraTexture(cmd, sourceTex, debugHandler.DebugScreenColorHandle, RenderBufferLoadAction.Load, RenderBufferStoreAction.Store, material, 0);
                 cameraData.renderer.ConfigureCameraTarget(debugHandler.DebugScreenColorHandle, debugHandler.DebugScreenDepthHandle);
             }
             else

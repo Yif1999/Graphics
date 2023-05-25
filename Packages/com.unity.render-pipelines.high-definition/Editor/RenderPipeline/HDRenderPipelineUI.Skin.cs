@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using static UnityEngine.Rendering.HighDefinition.RenderPipelineSettings;
 using UnityEngine.Rendering;
+using UnityEngine.Rendering.HighDefinition;
 
 namespace UnityEditor.Rendering.HighDefinition
 {
@@ -179,6 +180,7 @@ namespace UnityEditor.Rendering.HighDefinition
             public const string cacheErrorFormat = "This configuration will lead to more than 2 GB reserved for this cache at runtime! ({0} requested) Only {1} element will be reserved instead.";
             public const string cacheInfoFormat = "Reserving {0} in memory at runtime.";
             public const string multipleDifferenteValueMessage = "Multiple different values";
+            public const string rayTracingUnsupportedMessage = "The current HDRP Asset does not support Ray Tracing.";
 
             public static readonly GUIContent cookieSizeContent = EditorGUIUtility.TrTextContent("Cookie Size", "Specifies the maximum size for the individual 2D cookies that HDRP uses for Directional and Spot Lights.");
             public static readonly GUIContent cookieTextureArraySizeContent = EditorGUIUtility.TrTextContent("Texture Array Size", "Sets the maximum Texture Array size for the 2D cookies HDRP uses for Directional and Spot Lights. Higher values allow HDRP to use more cookies concurrently on screen.");
@@ -207,7 +209,7 @@ namespace UnityEditor.Rendering.HighDefinition
             public static readonly GUIContent maxDirectionalContent = EditorGUIUtility.TrTextContent("Maximum Directional on Screen", "Sets the maximum number of Directional Lights HDRP can handle on screen at once.");
             public static readonly GUIContent maxPonctualContent = EditorGUIUtility.TrTextContent("Maximum Punctual on Screen", "Sets the maximum number of Point and Spot Lights HDRP can handle on screen at once.");
             public static readonly GUIContent maxAreaContent = EditorGUIUtility.TrTextContent("Maximum Area on Screen", "Sets the maximum number of area Lights HDRP can handle on screen at once.");
-            public static readonly GUIContent maxCubeProbesContent = EditorGUIUtility.TrTextContent("Maximum Cube Reflection Probes on Screen", "Sets the maximum number of Cube Reflection Probes HDRP can handle on screen at once.");
+            public static readonly GUIContent maxCubeProbesContent = EditorGUIUtility.TrTextContent("Maximum Cube Reflection Probes on Screen", "Sets the maximum number of Cube Reflection Probes HDRP can handle on screen at once. This value is capped to " + HDRenderPipeline.k_MaxCubeReflectionsOnScreen + " for performance reasons");
             public static readonly GUIContent maxPlanarProbesContent = EditorGUIUtility.TrTextContent("Maximum Planar Reflection Probes on Screen", "Sets the maximum number of Planar Reflection Probes HDRP can handle on screen at once.");
             public static readonly GUIContent maxDecalContent = EditorGUIUtility.TrTextContent("Maximum Clustered Decals on Screen", "Sets the maximum number of decals that can affect transparent GameObjects on screen.");
             public static readonly GUIContent maxLightPerCellContent = EditorGUIUtility.TrTextContent("Maximum Lights per Cell (Ray Tracing)", "Sets the maximum number of lights HDRP can handle in each cell of the ray tracing light cluster.");

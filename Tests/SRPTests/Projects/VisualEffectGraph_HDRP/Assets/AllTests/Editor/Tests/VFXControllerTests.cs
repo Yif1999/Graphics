@@ -76,6 +76,7 @@ namespace UnityEditor.VFX.Test
             {
                 AssetDatabase.DeleteAsset(testAssetRandomFileName);
             }
+            VFXTestCommon.DeleteAllTemporaryGraph();
         }
 
         #pragma warning disable 0414
@@ -192,42 +193,47 @@ namespace UnityEditor.VFX.Test
             Undo.IncrementCurrentGroup();
             var crossDesc = VFXLibrary.GetOperators().FirstOrDefault(o => o.name.Contains("Cross"));
             var cross = m_ViewController.AddVFXOperator(new Vector2(0, 0), crossDesc);
+            m_ViewController.ApplyChanges();
 
-            foreach (var slot in cross.inputSlots.Concat(cross.outputSlots))
+            var operatorController = m_ViewController.allChildren.OfType<VFXOperatorController>().FirstOrDefault();
+            Assert.IsNotNull(operatorController);
+
+            foreach (var controller in operatorController.inputPorts.Concat(operatorController.outputPorts).Where(t => t.model.IsMasterSlot()))
             {
-                Undo.IncrementCurrentGroup();
-                Assert.IsTrue(slot.collapsed);
-                slot.collapsed = false;
+                Undo.IncrementCurrentGroup();   
+                Assert.IsTrue(controller.model.collapsed);
+                controller.ExpandPath();
+                Assert.IsTrue(!controller.model.collapsed);
             }
 
             m_ViewController.ApplyChanges();
 
             var totalSlotCount = cross.inputSlots.Concat(cross.outputSlots).Count();
-            for (int step = 1; step < totalSlotCount; step++)
+            for (int step = 1; step <= totalSlotCount; step++)
             {
                 Undo.PerformUndo();
                 var vfxOperatorController = m_ViewController.allChildren.OfType<VFXOperatorController>().FirstOrDefault();
                 Assert.IsNotNull(vfxOperatorController);
 
-                var slots = vfxOperatorController.model.inputSlots.Concat(vfxOperatorController.model.outputSlots).Reverse();
+                var slots = cross.inputSlots.Concat(cross.outputSlots).Reverse();
                 for (int i = 0; i < totalSlotCount; ++i)
-                {
+                {         
                     var slot = slots.ElementAt(i);
                     Assert.AreEqual(i < step, slot.collapsed);
                 }
             }
 
-            for (int step = 1; step < totalSlotCount; step++)
+            for (int step = 1; step <= totalSlotCount; step++)
             {
                 Undo.PerformRedo();
                 var vfxOperatorController = m_ViewController.allChildren.OfType<VFXOperatorController>().FirstOrDefault();
                 Assert.IsNotNull(vfxOperatorController);
 
-                var slots = vfxOperatorController.model.inputSlots.Concat(vfxOperatorController.model.outputSlots);
+                var slots = cross.inputSlots.Concat(cross.outputSlots);
                 for (int i = 0; i < totalSlotCount; ++i)
                 {
                     var slot = slots.ElementAt(i);
-                    Assert.AreEqual(i > step, slot.collapsed);
+                    Assert.AreEqual(i >= step, slot.collapsed);
                 }
             }
         }
@@ -237,13 +243,15 @@ namespace UnityEditor.VFX.Test
         {
             Undo.IncrementCurrentGroup();
             var absDesc = VFXLibrary.GetOperators().FirstOrDefault(o => o.name == "Absolute");
-            var abs = m_ViewController.AddVFXOperator(new Vector2(0, 0), absDesc);
+            m_ViewController.AddVFXOperator(new Vector2(0, 0), absDesc);
+            m_ViewController.ApplyChanges();
+            var absController = m_ViewController.allChildren.OfType<VFXOperatorController>().FirstOrDefault();
 
             var positions = new[] { new Vector2(1, 1), new Vector2(2, 2), new Vector2(3, 3), new Vector2(4, 4) };
             foreach (var position in positions)
             {
                 Undo.IncrementCurrentGroup();
-                abs.position = position;
+                absController.position = position;
             }
 
             Func<Type, VFXNodeController> fnFindController = delegate(Type type)
@@ -450,10 +458,9 @@ namespace UnityEditor.VFX.Test
             var absOperator = fnAllOperatorController()[0];
 
             Undo.IncrementCurrentGroup();
+
             absOperator.inputPorts[0].value = 0;
-
             absOperator.position = new Vector2(1, 2);
-
 
             Undo.IncrementCurrentGroup();
 
@@ -462,7 +469,7 @@ namespace UnityEditor.VFX.Test
 
             Undo.PerformUndo();
 
-            Assert.AreEqual(123, absOperator.inputPorts[0].value);
+            Assert.AreEqual(0, absOperator.inputPorts[0].value);
             Assert.AreEqual(new Vector2(1, 2), absOperator.position);
 
             Undo.PerformRedo();
@@ -823,6 +830,115 @@ namespace UnityEditor.VFX.Test
 
             Undo.PerformUndo();
             Assert.AreEqual(1, fnFlowEdgeCount(), "Fail undo Delete");
+        }
+
+        [Test]
+        public void UndoRedoEnableBlock()
+        {
+            var contextUpdateDesc = VFXLibrary.GetContexts().FirstOrDefault(o => o.name.Contains("Update"));
+            var gravityDesc = VFXLibrary.GetBlocks().FirstOrDefault(o => o.name == "Gravity");
+            var notOperatorDesc = VFXLibrary.GetOperators().FirstOrDefault(o => o.name == "Not");
+
+            var updateContext = m_ViewController.AddVFXContext(new Vector2(10, 0), contextUpdateDesc);
+            var gravityBlock = gravityDesc.CreateInstance();
+            var notOperator = m_ViewController.AddVFXOperator(new Vector2(0, 8), notOperatorDesc);
+
+            notOperator.outputSlots[0].Link(gravityBlock.activationSlot);
+            updateContext.AddChild(gravityBlock);
+            m_ViewController.ApplyChanges();
+
+            Assert.IsTrue(gravityBlock.enabled);
+
+            Undo.IncrementCurrentGroup();
+
+            var notController = m_ViewController.GetNodeController(notOperator, 0);
+            notController.inputPorts[0].value = true;
+            Assert.IsFalse(gravityBlock.enabled);
+
+            Undo.PerformUndo();
+            Assert.IsTrue(gravityBlock.enabled);
+
+            Undo.PerformRedo();
+            Assert.IsFalse(gravityBlock.enabled);
+        }
+
+        [Test]
+        public void UndoRedoAddRemoveGroup()
+        {
+            var notOperatorDesc = VFXLibrary.GetOperators().FirstOrDefault(o => o.name == "Not");
+            var notOperatorA = m_ViewController.AddVFXOperator(new Vector2(0, 0), notOperatorDesc);
+            var notOperatorB = m_ViewController.AddVFXOperator(new Vector2(0, 40), notOperatorDesc);
+
+            m_ViewController.ApplyChanges();
+
+            var notControllerA = m_ViewController.GetNodeController(notOperatorA, 0);
+            var notControllerB = m_ViewController.GetNodeController(notOperatorB, 0);
+
+            Undo.IncrementCurrentGroup();
+
+            m_ViewController.GroupNodes(new [] { notControllerA, notControllerB });
+            m_ViewController.ApplyChanges();
+
+            Assert.AreEqual(1, m_ViewController.groupNodes.Count);
+            Assert.IsTrue(m_ViewController.groupNodes.First().ContainsNode(notControllerA));
+            Assert.IsTrue(m_ViewController.groupNodes.First().ContainsNode(notControllerB));
+
+            Undo.PerformUndo();
+
+            Assert.AreEqual(0, m_ViewController.groupNodes.Count);
+
+            Undo.PerformRedo();
+
+            notControllerA = m_ViewController.GetNodeController(notOperatorA, 0);
+            notControllerB = m_ViewController.GetNodeController(notOperatorB, 0);
+
+            Assert.AreEqual(1, m_ViewController.groupNodes.Count);
+            Assert.IsTrue(m_ViewController.groupNodes.First().ContainsNode(notControllerA));
+            Assert.IsTrue(m_ViewController.groupNodes.First().ContainsNode(notControllerB));
+        }
+
+        [Test]
+        public void UndoRedoAddModifyRemoveStickyNote()
+        {
+            const string testStr = "TEST";
+
+            m_ViewController.AddStickyNote(new Vector2(0, 0), null);
+            m_ViewController.ApplyChanges();
+
+            Assert.AreEqual(1, m_ViewController.stickyNotes.Count);
+            Assert.AreNotEqual(testStr, m_ViewController.stickyNotes.First().title);
+
+            Undo.IncrementCurrentGroup();
+
+            m_ViewController.stickyNotes.First().title = testStr;
+            Assert.AreEqual(testStr, m_ViewController.stickyNotes.First().title);
+
+            Undo.IncrementCurrentGroup();
+
+            m_ViewController.RemoveElement(m_ViewController.stickyNotes.First());
+            Assert.AreEqual(0, m_ViewController.stickyNotes.Count);
+
+            Undo.PerformUndo();
+            Assert.AreEqual(1, m_ViewController.stickyNotes.Count);
+            Assert.AreEqual(testStr, m_ViewController.stickyNotes.First().title);
+
+            Undo.PerformUndo();
+            Assert.AreEqual(1, m_ViewController.stickyNotes.Count);
+            Assert.AreNotEqual(testStr, m_ViewController.stickyNotes.First().title);
+
+            Undo.PerformUndo();
+            Assert.AreEqual(0, m_ViewController.stickyNotes.Count);
+
+            Undo.PerformRedo();
+            Assert.AreEqual(1, m_ViewController.stickyNotes.Count);
+            Assert.AreNotEqual(testStr, m_ViewController.stickyNotes.First().title);
+
+            Undo.PerformRedo();
+            Assert.AreEqual(1, m_ViewController.stickyNotes.Count);
+            Assert.AreEqual(testStr, m_ViewController.stickyNotes.First().title);
+
+            Undo.PerformRedo();
+            Assert.AreEqual(0, m_ViewController.stickyNotes.Count);
         }
 
         [Test]
@@ -1250,6 +1366,82 @@ namespace UnityEditor.VFX.Test
 
             window.Close();
 
+            yield return null;
+        }
+
+        [UnityTest, Description("Repro from UUM-39696")]
+        public IEnumerator Convert_To_Subgraph_Block_With_Different_Slot_Type()
+        {
+            var kSourceAsset = "Assets/AllTests/Editor/Tests/VFXSubGraph_Repro_39696.vfx_";
+            var graph = VFXTestCommon.CopyTemporaryGraph(kSourceAsset);
+            Assert.IsNotNull(graph);
+            yield return null;
+
+            var assetPath = AssetDatabase.GetAssetPath(graph);
+            var asset = AssetDatabase.LoadAssetAtPath<VisualEffectAsset>(assetPath);
+            Assert.IsNotNull(asset);
+            Assert.IsTrue(VisualEffectAssetEditor.OnOpenVFX(asset.GetInstanceID(), 0));
+
+            var window = VFXViewWindow.GetWindow(asset);
+            window.LoadAsset(asset, null);
+            var viewController = window.graphView.controller;
+            Assert.IsNotNull(viewController);
+            yield return null;
+
+            var initializeContext = viewController.graph.children.OfType<VFXBasicInitialize>().Single();
+            var setVelocityBlock = initializeContext.children.OfType<VelocityDirection>().First();
+
+            var controller = viewController.GetNodeController(setVelocityBlock, 0);
+            var subgraphPath = $"Assets/TmpTests/subgraph_39696_{Guid.NewGuid()}.vfxblock";
+
+            VFXConvertSubgraph.ConvertToSubgraphBlock(window.graphView, new[] { controller }, Rect.zero, subgraphPath);
+            viewController.ApplyChanges();
+            yield return null;
+
+            //Main Graph Content
+            initializeContext = viewController.graph.children.OfType<VFXBasicInitialize>().Single();
+            setVelocityBlock = initializeContext.children.OfType<VelocityDirection>().FirstOrDefault();
+            Assert.IsNull(setVelocityBlock);
+
+            var subgraphBlock = initializeContext.children.OfType<VFXSubgraphBlock>().Single();
+            Assert.AreEqual(2u, subgraphBlock.inputSlots.Count);
+
+            Assert.AreEqual(subgraphBlock.inputSlots[0].valueType, VFXValueType.Boolean);
+            Assert.AreEqual(subgraphBlock.inputSlots[1].valueType, VFXValueType.Float);
+
+            Assert.IsTrue(subgraphBlock.inputSlots[0].HasLink());
+            Assert.IsTrue(subgraphBlock.inputSlots[1].HasLink());
+
+            //Subgraph Content
+            var subgraphContent = AssetDatabase.LoadAssetAtPath<VisualEffectSubgraph>(subgraphPath);
+            var subgraph = (VFXGraph)subgraphContent.GetOrCreateResource().graph;
+            var blockSubgraphContext = subgraph.children.OfType<VFXBlockSubgraphContext>().Single();
+            Assert.AreEqual(1u, blockSubgraphContext.children.Count());
+
+            var innerSetVelocityBlock = blockSubgraphContext.children.OfType<VelocityDirection>().First();
+            Assert.IsTrue(innerSetVelocityBlock.activationSlot.HasLink());
+
+            foreach (var slot in innerSetVelocityBlock.inputSlots)
+            {
+                if (slot.name == "MinSpeed")
+                    Assert.IsTrue(slot.HasLink());
+                else
+                    Assert.IsFalse(slot.HasLink(true));
+            }
+
+            var parameters = subgraph.children.OfType<VFXParameter>().ToList();
+            Assert.AreEqual(2, parameters.Count);
+
+            var enabled = parameters.First(o => o.exposedName == "enabled"); //There is an automatic dodge of reserved name, it shouldn't be _vfx_enabled here.
+            var minSpeed = parameters.First(o => o.exposedName == "MinSpeed");
+
+            Assert.IsTrue(enabled.exposed);
+            Assert.IsTrue(minSpeed.exposed);
+
+            Assert.AreEqual(typeof(bool), enabled.type);
+            Assert.AreEqual(typeof(float), minSpeed.type);
+
+            window.Close();
             yield return null;
         }
     }
