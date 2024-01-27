@@ -17,13 +17,20 @@ public class FullScreenPassRendererFeature : ScriptableRendererFeature
     public enum InjectionPoint
     {
         /// <summary>
+        /// Inject a full screen pass after skybox is rendered
+        /// </summary>
+        BeforeRnderingSkyBox = RenderPassEvent.BeforeRenderingSkybox,
+
+        /// <summary>
         /// Inject a full screen pass before transparents are rendered
         /// </summary>
         BeforeRenderingTransparents = RenderPassEvent.BeforeRenderingTransparents,
+
         /// <summary>
         /// Inject a full screen pass before post processing is rendered
         /// </summary>
         BeforeRenderingPostProcessing = RenderPassEvent.BeforeRenderingPostProcessing,
+
         /// <summary>
         /// Inject a full screen pass after post processing is rendered
         /// </summary>

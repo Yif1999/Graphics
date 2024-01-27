@@ -6,6 +6,8 @@ namespace UnityEngine.Rendering.Universal
     [Serializable]
     internal class ScreenSpaceShadowsSettings
     {
+        public Material filterMaterial;
+        public Material stylizedMaterial;
     }
 
     [DisallowMultipleRendererFeature("Screen Space Shadows")]
@@ -111,6 +113,8 @@ namespace UnityEngine.Rendering.Universal
             private Material m_Material;
             private ScreenSpaceShadowsSettings m_CurrentSettings;
             private RTHandle m_RenderTarget;
+            private RTHandle tempTexture0;
+            private RTHandle tempTexture1;
 
             internal ScreenSpaceShadowsPass()
             {
@@ -120,6 +124,8 @@ namespace UnityEngine.Rendering.Universal
             public void Dispose()
             {
                 m_RenderTarget?.Release();
+                tempTexture0?.Release();
+                tempTexture1?.Release();
             }
 
             internal bool Setup(ScreenSpaceShadowsSettings featureSettings, Material material)
@@ -137,32 +143,46 @@ namespace UnityEngine.Rendering.Universal
                 var desc = renderingData.cameraData.cameraTargetDescriptor;
                 desc.depthBufferBits = 0;
                 desc.msaaSamples = 1;
-                desc.graphicsFormat = RenderingUtils.SupportsGraphicsFormat(GraphicsFormat.R8_UNorm, FormatUsage.Linear | FormatUsage.Render)
-                    ? GraphicsFormat.R8_UNorm
-                    : GraphicsFormat.B8G8R8A8_UNorm;
+                desc.graphicsFormat = GraphicsFormat.B8G8R8A8_UNorm;
 
                 RenderingUtils.ReAllocateIfNeeded(ref m_RenderTarget, desc, FilterMode.Point, TextureWrapMode.Clamp, name: "_ScreenSpaceShadowmapTexture");
                 cmd.SetGlobalTexture(m_RenderTarget.name, m_RenderTarget.nameID);
 
                 ConfigureTarget(m_RenderTarget);
                 ConfigureClear(ClearFlag.None, Color.white);
+
+                RenderTextureDescriptor bufferDesc = renderingData.cameraData.cameraTargetDescriptor;
+                bufferDesc.depthBufferBits = 0;
+                bufferDesc.graphicsFormat = GraphicsFormat.B8G8R8A8_UNorm;
+
+                RenderingUtils.ReAllocateIfNeeded(ref tempTexture0, bufferDesc, FilterMode.Bilinear, TextureWrapMode.Clamp, name: "_Filter0");
+                cmd.SetGlobalTexture(tempTexture0.name, tempTexture0.nameID);
+                RenderingUtils.ReAllocateIfNeeded(ref tempTexture1, bufferDesc, FilterMode.Bilinear, TextureWrapMode.Clamp, name: "_Filter1");
+                cmd.SetGlobalTexture(tempTexture1.name, tempTexture1.nameID);
             }
 
             /// <inheritdoc/>
             public override void Execute(ScriptableRenderContext context, ref RenderingData renderingData)
             {
-                if (m_Material == null)
+                if (m_Material == null || m_CurrentSettings.filterMaterial == null || m_CurrentSettings.stylizedMaterial == null)
                 {
                     Debug.LogErrorFormat("{0}.Execute(): Missing material. ScreenSpaceShadows pass will not execute. Check for missing reference in the renderer resources.", GetType().Name);
                     return;
                 }
 
                 Camera camera = renderingData.cameraData.camera;
-
                 var cmd = renderingData.commandBuffer;
                 using (new ProfilingScope(cmd, m_ProfilingSampler))
                 {
                     Blitter.BlitCameraTexture(cmd, m_RenderTarget, m_RenderTarget, m_Material, 0);
+
+                    Blitter.BlitCameraTexture(cmd, m_RenderTarget, tempTexture0, m_CurrentSettings.filterMaterial, 0);
+                    Blitter.BlitCameraTexture(cmd, tempTexture0, tempTexture1, m_CurrentSettings.filterMaterial, 1);
+                    // Blitter.BlitCameraTexture(cmd, tempTexture1, tempTexture0, m_CurrentSettings.filterMaterial, 0);
+                    // Blitter.BlitCameraTexture(cmd, tempTexture0, tempTexture1, m_CurrentSettings.filterMaterial, 1);
+
+                    Blitter.BlitCameraTexture(cmd, tempTexture1, m_RenderTarget, m_CurrentSettings.stylizedMaterial, 0);
+
                     CoreUtils.SetKeyword(cmd, ShaderKeywordStrings.MainLightShadows, false);
                     CoreUtils.SetKeyword(cmd, ShaderKeywordStrings.MainLightShadowCascades, false);
                     CoreUtils.SetKeyword(cmd, ShaderKeywordStrings.MainLightShadowScreen, true);

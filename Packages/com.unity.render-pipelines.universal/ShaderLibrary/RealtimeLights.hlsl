@@ -13,8 +13,8 @@ struct Light
 {
     half3   direction;
     half3   color;
-    float   distanceAttenuation; // full-float precision required on some platforms
-    half    shadowAttenuation;
+    float3   distanceAttenuation; // full-float precision required on some platforms
+    half3    shadowAttenuation;
     uint    layerMask;
 };
 
@@ -119,6 +119,12 @@ Light GetMainLight(float4 shadowCoord)
 {
     Light light = GetMainLight();
     light.shadowAttenuation = MainLightRealtimeShadow(shadowCoord);
+    return light;
+}
+Light GetMainLight(float4 shadowCoord, float3 positionWS)
+{
+    Light light = GetMainLight();
+    light.shadowAttenuation = MainLightRealtimeShadow(shadowCoord, positionWS);
     return light;
 }
 

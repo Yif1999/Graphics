@@ -32,6 +32,7 @@ namespace UnityEngine.Rendering.Universal.Internal
         int m_MainLightShadowmapID;
         internal RTHandle m_MainLightShadowmapTexture;
         internal RTHandle m_EmptyLightShadowmapTexture;
+        private static readonly int _MyShadowmap = Shader.PropertyToID("_MyShadowmapTexture");
 
         Matrix4x4[] m_MainLightShadowMatrices;
         ShadowSliceData[] m_CascadeSlices;
@@ -131,6 +132,8 @@ namespace UnityEngine.Rendering.Universal.Internal
                 bool success = ShadowUtils.ExtractDirectionalLightMatrix(ref renderingData.cullResults, ref renderingData.shadowData,
                     shadowLightIndex, cascadeIndex, renderTargetWidth, renderTargetHeight, shadowResolution, light.shadowNearPlane,
                     out m_CascadeSplitDistances[cascadeIndex], out m_CascadeSlices[cascadeIndex]);
+
+                    // Debug.Log(m_CascadeSlices[0].splitData.GetPlane(0));
 
                 if (!success)
                     return SetupForEmptyRendering(ref renderingData);
@@ -242,10 +245,12 @@ namespace UnityEngine.Rendering.Universal.Internal
                 renderingData.shadowData.isKeywordSoftShadowsEnabled = shadowLight.light.shadows == LightShadows.Soft && renderingData.shadowData.supportsSoftShadows;
                 CoreUtils.SetKeyword(cmd, ShaderKeywordStrings.MainLightShadows, renderingData.shadowData.mainLightShadowCascadesCount == 1);
                 CoreUtils.SetKeyword(cmd, ShaderKeywordStrings.MainLightShadowCascades, renderingData.shadowData.mainLightShadowCascadesCount > 1);
-                ShadowUtils.SetSoftShadowQualityShaderKeywords(cmd, ref renderingData.shadowData);
+                CoreUtils.SetKeyword(cmd, ShaderKeywordStrings.SoftShadows, renderingData.shadowData.isKeywordSoftShadowsEnabled);
 
                 SetupMainLightShadowReceiverConstants(cmd, ref shadowLight, ref renderingData.shadowData);
             }
+            
+            cmd.SetGlobalTexture(_MyShadowmap, m_MainLightShadowmapTexture);
         }
 
         void SetupMainLightShadowReceiverConstants(CommandBuffer cmd, ref VisibleLight shadowLight, ref ShadowData shadowData)

@@ -3,6 +3,7 @@
 
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Shadow/ShadowSamplingTent.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Shadow/ShadowSamplingPCSS.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/GlobalSamplers.hlsl"
 #include "Core.hlsl"
 #include "Shadows.deprecated.hlsl"
@@ -178,18 +179,18 @@ half4 GetAdditionalLightShadowParams(int lightIndex)
     #endif
 }
 
-half SampleScreenSpaceShadowmap(float4 shadowCoord)
+half3 SampleScreenSpaceShadowmap(float4 shadowCoord)
 {
     shadowCoord.xy /= shadowCoord.w;
 
     // The stereo transform has to happen after the manual perspective divide
     shadowCoord.xy = UnityStereoTransformScreenSpaceTex(shadowCoord.xy);
 
-#if defined(UNITY_STEREO_INSTANCING_ENABLED) || defined(UNITY_STEREO_MULTIVIEW_ENABLED)
-    half attenuation = SAMPLE_TEXTURE2D_ARRAY(_ScreenSpaceShadowmapTexture, sampler_PointClamp, shadowCoord.xy, unity_StereoEyeIndex).x;
-#else
-    half attenuation = half(SAMPLE_TEXTURE2D(_ScreenSpaceShadowmapTexture, sampler_PointClamp, shadowCoord.xy).x);
-#endif
+    #if defined(UNITY_STEREO_INSTANCING_ENABLED) || defined(UNITY_STEREO_MULTIVIEW_ENABLED)
+        half3 attenuation = SAMPLE_TEXTURE2D_ARRAY(_ScreenSpaceShadowmapTexture, sampler_PointClamp, shadowCoord.xy, unity_StereoEyeIndex).rgb;
+    #else
+        half3 attenuation = SAMPLE_TEXTURE2D(_ScreenSpaceShadowmapTexture, sampler_PointClamp, shadowCoord.xy).rgb;
+    #endif
 
     return attenuation;
 }
@@ -329,17 +330,91 @@ float4 TransformWorldToShadowCoord(float3 positionWS)
     return float4(shadowCoord.xyz, 0);
 }
 
+real SampleShadowmapPCSS(TEXTURE2D_SHADOW_PARAM(ShadowMap, sampler_ShadowMap), float4 shadowCoord, ShadowSamplingData samplingData, float3 positionWS)
+{
+    float4 cascadeShadowSplitSphereRadi = float4(_CascadeShadowSplitSpheres0.w, _CascadeShadowSplitSpheres1.w, _CascadeShadowSplitSpheres2.w, _CascadeShadowSplitSpheres3.w);
+    half cascadeIndex = ComputeCascadeIndex(positionWS);
+    float rotateAngle = RandomRange(positionWS.xy, 0, 2.0 * 3.1415926);
+    float orthRadius0 = cascadeShadowSplitSphereRadi[0];
+    float orthRadius = cascadeShadowSplitSphereRadi[cascadeIndex];
+    float searchSize = 40.0 * orthRadius0/orthRadius;
+
+    float2 averageBlockerData = ComputeAverageBlockerData(shadowCoord, rotateAngle, searchSize, _MainLightShadowmapSize.z, orthRadius);
+    float averageBlockerDepth = averageBlockerData.x;
+    float averageBlockerCount = averageBlockerData.y;
+
+    float kernelSize = (averageBlockerDepth-shadowCoord.z)*orthRadius0*8.0;
+    kernelSize = clamp(kernelSize, 2.0 * orthRadius0/orthRadius, 40.0 * orthRadius0/orthRadius);
+
+    real attenuation = SampleShadowPCF(TEXTURE2D_SHADOW_ARGS(ShadowMap, sampler_ShadowMap), shadowCoord, kernelSize, rotateAngle, _MainLightShadowmapSize.z, orthRadius, orthRadius0);
+
+    return attenuation;
+}
+
+real SampleShadowmap(TEXTURE2D_SHADOW_PARAM(ShadowMap, sampler_ShadowMap), float4 shadowCoord, float3 positionWS, ShadowSamplingData samplingData, half4 shadowParams, bool isPerspectiveProjection = true)
+{
+    // Compiler will optimize this branch away as long as isPerspectiveProjection is known at compile time
+    if (isPerspectiveProjection)
+        shadowCoord.xyz /= shadowCoord.w;
+
+    real attenuation;
+    real shadowStrength = shadowParams.x;
+
+    // Quality levels are only for platforms requiring strict static branches
+#if _SHADOWS_SOFT_LOW
+    attenuation = SampleShadowmapFilteredLowQuality(TEXTURE2D_SHADOW_ARGS(ShadowMap, sampler_ShadowMap), shadowCoord, samplingData);
+#elif _SHADOWS_SOFT_MEDIUM
+    attenuation = SampleShadowmapFilteredMediumQuality(TEXTURE2D_SHADOW_ARGS(ShadowMap, sampler_ShadowMap), shadowCoord, samplingData);
+#elif _SHADOWS_SOFT_HIGH
+    attenuation = SampleShadowmapFilteredHighQuality(TEXTURE2D_SHADOW_ARGS(ShadowMap, sampler_ShadowMap), shadowCoord, samplingData);
+#elif _SHADOWS_SOFT
+    if(shadowParams.y > SOFT_SHADOW_QUALITY_OFF)
+    {
+        if (ComputeCascadeIndex(positionWS)<2)
+            attenuation = SampleShadowmapPCSS(TEXTURE2D_SHADOW_ARGS(ShadowMap, sampler_ShadowMap), shadowCoord, samplingData, positionWS);
+        else
+            attenuation = SampleShadowmapFilteredHighQuality(TEXTURE2D_SHADOW_ARGS(ShadowMap, sampler_ShadowMap), shadowCoord, samplingData);
+    }
+    else
+    {
+        attenuation = real(SAMPLE_TEXTURE2D_SHADOW(ShadowMap, sampler_ShadowMap, shadowCoord.xyz));
+    }
+#else
+    attenuation = real(SAMPLE_TEXTURE2D_SHADOW(ShadowMap, sampler_ShadowMap, shadowCoord.xyz));
+#endif
+
+    attenuation = LerpWhiteTo(attenuation, shadowStrength);
+
+    // Shadow coords that fall out of the light frustum volume must always return attenuation 1.0
+    // TODO: We could use branch here to save some perf on some platforms.
+    return BEYOND_SHADOW_FAR(shadowCoord) ? 1.0 : attenuation;
+}
+
+
 half MainLightRealtimeShadow(float4 shadowCoord)
 {
     #if !defined(MAIN_LIGHT_CALCULATE_SHADOWS)
         return half(1.0);
     #elif defined(_MAIN_LIGHT_SHADOWS_SCREEN) && !defined(_SURFACE_TYPE_TRANSPARENT)
-        return SampleScreenSpaceShadowmap(shadowCoord);
+        return SampleScreenSpaceShadowmap(shadowCoord).r;
     #else
         ShadowSamplingData shadowSamplingData = GetMainLightShadowSamplingData();
         half4 shadowParams = GetMainLightShadowParams();
         return SampleShadowmap(TEXTURE2D_ARGS(_MainLightShadowmapTexture, sampler_LinearClampCompare), shadowCoord, shadowSamplingData, shadowParams, false);
     #endif
+}
+
+half3 MainLightRealtimeShadow(float4 shadowCoord, float3 positionWS)
+{
+#if !defined(MAIN_LIGHT_CALCULATE_SHADOWS)
+    return half(1.0);
+#elif defined(_MAIN_LIGHT_SHADOWS_SCREEN) && !defined(_SURFACE_TYPE_TRANSPARENT)
+    return SampleScreenSpaceShadowmap(shadowCoord);
+#else
+    ShadowSamplingData shadowSamplingData = GetMainLightShadowSamplingData();
+    half4 shadowParams = GetMainLightShadowParams();
+    return SampleShadowmap(TEXTURE2D_ARGS(_MainLightShadowmapTexture, sampler_MainLightShadowmapTexture), shadowCoord, positionWS, shadowSamplingData, shadowParams, false);
+#endif
 }
 
 // returns 0.0 if position is in light's shadow
@@ -399,7 +474,7 @@ half GetAdditionalLightShadowFade(float3 positionWS)
     #endif
 }
 
-half MixRealtimeAndBakedShadows(half realtimeShadow, half bakedShadow, half shadowFade)
+half3 MixRealtimeAndBakedShadows(half3 realtimeShadow, half bakedShadow, half shadowFade)
 {
 #if defined(LIGHTMAP_SHADOW_MIXING)
     return min(lerp(realtimeShadow, 1, shadowFade), bakedShadow);
@@ -418,9 +493,9 @@ half BakedShadow(half4 shadowMask, half4 occlusionProbeChannels)
     return bakedShadow;
 }
 
-half MainLightShadow(float4 shadowCoord, float3 positionWS, half4 shadowMask, half4 occlusionProbeChannels)
+half3 MainLightShadow(float4 shadowCoord, float3 positionWS, half4 shadowMask, half4 occlusionProbeChannels)
 {
-    half realtimeShadow = MainLightRealtimeShadow(shadowCoord);
+    half3 realtimeShadow = MainLightRealtimeShadow(shadowCoord, positionWS);
 
 #ifdef CALCULATE_BAKED_SHADOWS
     half bakedShadow = BakedShadow(shadowMask, occlusionProbeChannels);
@@ -453,7 +528,7 @@ half AdditionalLightShadow(int lightIndex, float3 positionWS, half3 lightDirecti
     half shadowFade = half(1.0);
 #endif
 
-    return MixRealtimeAndBakedShadows(realtimeShadow, bakedShadow, shadowFade);
+    return MixRealtimeAndBakedShadows(realtimeShadow, bakedShadow, shadowFade).r;
 }
 
 float4 GetShadowCoord(VertexPositionInputs vertexInput)
